@@ -26,20 +26,6 @@ class CreateStripeSessionView(APIView):
 
             amount_in_paise = int(booking.total_amount * 100)
             
-            # --- MOCK BYPASS FOR TESTING ---
-            if settings.STRIPE_SECRET_KEY == 'sk_test_sample':
-                # Create mock payment and return mock URL
-                Payment.objects.create(
-                    booking=booking,
-                    stripe_session_id=f'session_mock_{booking.id}',
-                    amount=booking.total_amount,
-                    status='PENDING'
-                )
-                return Response({
-                    'url': f'{base_url}/payment/success?session_id=session_mock_{booking.id}'
-                }, status=status.HTTP_201_CREATED)
-            # --------------------------------
-            
             try:
                 checkout_session = stripe.checkout.Session.create(
                     payment_method_types=['card'],
@@ -87,33 +73,6 @@ class VerifyStripeView(APIView):
                 payment = Payment.objects.get(stripe_session_id=session_id, booking__user=request.user)
             except Payment.DoesNotExist:
                 return Response({'error': 'Payment record not found'}, status=status.HTTP_404_NOT_FOUND)
-
-            # --- MOCK BYPASS FOR TESTING ---
-            if session_id.startswith('session_mock_'):
-                payment.status = 'SUCCESS'
-                payment.save()
-                booking = payment.booking
-                booking.status = 'CONFIRMED'
-                booking.save()
-                for seat in booking.seats.all():
-                    seat.status = 'BOOKED'
-                    seat.save()
-                    
-                # Send Email Confirmation
-                seat_numbers = ", ".join([f"{s.row}{s.number}" for s in booking.seats.all()])
-                try:
-                    send_mail(
-                        subject=f"Booking Confirmed: {booking.event.title}",
-                        message=f"Hi {request.user.first_name},\n\nYour booking is confirmed!\n\nEvent: {booking.event.title}\nVenue: {booking.event.venue}\nDate: {booking.event.date.strftime('%d %b %Y, %I:%M %p')}\nSeats: {seat_numbers}\nAmount Paid: Rs {booking.total_amount}\n\nEnjoy the event!\nEventix Team",
-                        from_email=settings.EMAIL_HOST_USER,
-                        recipient_list=[request.user.email],
-                        fail_silently=True,
-                    )
-                except Exception as e:
-                    print(f"Failed to send email: {e}")
-
-                return Response({'status': 'Mock Payment verified and booking confirmed'})
-            # --------------------------------
 
             try:
                 session = stripe.checkout.Session.retrieve(session_id)
